@@ -1,0 +1,124 @@
+// yeah just a simple schema for storing code reviews and stuff
+// nothing fancy but gets the job done
+
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    output = "/home/ubuntu/code_review_bot/app/node_modules/.prisma/client"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model Repository {
+  id          String   @id @default(cuid())
+  name        String   // like "facebook/react"
+  url         String   // github repo url
+  description String?  // repo description from github
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // one repo can have multiple analysis sessions
+  analyses    Analysis[]
+  
+  @@unique([url]) // can't have duplicate repos
+}
+
+model Analysis {
+  id            String        @id @default(cuid())
+  repositoryId  String
+  repository    Repository    @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  
+  // analysis metadata
+  status        AnalysisStatus @default(PENDING)
+  progress      Int           @default(0) // percentage done
+  totalFiles    Int           @default(0)
+  processedFiles Int          @default(0)
+  
+  // github token used (we don't store the actual token for security)
+  tokenHash     String?       // just a hash to identify which token was used
+  
+  // timing info
+  startedAt     DateTime      @default(now())
+  completedAt   DateTime?
+  
+  // summary stats
+  totalIssues   Int           @default(0)
+  criticalIssues Int          @default(0)
+  warningIssues Int           @default(0)
+  infoIssues    Int           @default(0)
+  
+  // analysis reports for each file
+  reports       Report[]
+  
+  @@index([repositoryId])
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  analysisId  String
+  analysis    Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  
+  // file info
+  filename    String   // relative path in repo
+  language    String   // python, javascript, java, cpp
+  fileSize    Int      // size in bytes
+  
+  // raw file content (we need this for line-by-line analysis)
+  content     String   @db.Text
+  
+  // analysis results
+  issues      Issue[]
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([analysisId])
+}
+
+model Issue {
+  id          String      @id @default(cuid())
+  reportId    String
+  report      Report      @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  
+  // issue details
+  type        IssueType
+  severity    IssueSeverity
+  title       String      // short description
+  description String      @db.Text // detailed explanation
+  suggestion  String?     @db.Text // how to fix it
+  
+  // location in file
+  lineNumber  Int?
+  columnStart Int?
+  columnEnd   Int?
+  codeSnippet String?     // the problematic code
+  
+  createdAt   DateTime    @default(now())
+  
+  @@index([reportId])
+}
+
+enum AnalysisStatus {
+  PENDING
+  FETCHING
+  ANALYZING
+  COMPLETED
+  FAILED
+}
+
+enum IssueType {
+  BUG
+  SECURITY
+  CODE_SMELL
+  STYLE
+  PERFORMANCE
+  MAINTAINABILITY
+}
+
+enum IssueSeverity {
+  CRITICAL
+  WARNING
+  INFO
+}
